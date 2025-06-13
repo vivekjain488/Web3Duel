@@ -20,13 +20,16 @@ import {
   useDisclosure
 } from '@chakra-ui/react';
 import { useWeb3 } from '../context/Web3Context';
+import { useNavigate } from 'react-router-dom';
 
 const GameCard = ({ game, onGameUpdate, isMyGame = false }) => {
   const [isJoining, setIsJoining] = useState(false);
+  const [isClaiming, setIsClaiming] = useState(false);
   const { gameContract, account, updateTokenBalance } = useWeb3();
   const { isOpen, onOpen, onClose } = useDisclosure();
   const cardBg = useColorModeValue('white', 'gray.800');
   const toast = useToast();
+  const navigate = useNavigate();
 
   const joinGame = async () => {
     if (!gameContract || !account) return;
@@ -38,15 +41,24 @@ const GameCard = ({ game, onGameUpdate, isMyGame = false }) => {
       
       toast({
         title: 'Game Joined!',
-        description: 'You have successfully joined the game!',
+        description: 'Redirecting to game...',
         status: 'success',
         duration: 3000,
         isClosable: true,
       });
       
       updateTokenBalance();
-      onGameUpdate();
+      
+      // Only call onGameUpdate if it exists
+      if (onGameUpdate && typeof onGameUpdate === 'function') {
+        onGameUpdate();
+      }
+      
       onClose();
+      
+      // Navigate to game
+      navigate(`/game/${game.id}`);
+      
     } catch (error) {
       console.error('Error joining game:', error);
       toast({
@@ -61,9 +73,51 @@ const GameCard = ({ game, onGameUpdate, isMyGame = false }) => {
     }
   };
 
+  const claimPrize = async () => {
+    if (!gameContract || !account) return;
+
+    try {
+      setIsClaiming(true);
+      const tx = await gameContract.claimPrize(game.id);
+      await tx.wait();
+      
+      toast({
+        title: 'Prize Claimed! 🎉',
+        description: 'You have successfully claimed your 2 W3D prize!',
+        status: 'success',
+        duration: 5000,
+        isClosable: true,
+      });
+      
+      updateTokenBalance();
+      
+      // Only call onGameUpdate if it exists
+      if (onGameUpdate && typeof onGameUpdate === 'function') {
+        onGameUpdate();
+      }
+    } catch (error) {
+      console.error('Error claiming prize:', error);
+      toast({
+        title: 'Failed to Claim Prize',
+        description: error.message,
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
+    } finally {
+      setIsClaiming(false);
+    }
+  };
+
   const getGameStatus = () => {
-    if (game.winner) return 'completed';
-    if (game.player2) return 'active';
+    // Check if winner exists and is not zero address
+    if (game.winner && game.winner !== '0x0000000000000000000000000000000000000000') {
+      return 'completed';
+    }
+    // Check if player2 exists and is not zero address
+    if (game.player2 && game.player2 !== '0x0000000000000000000000000000000000000000') {
+      return 'active';
+    }
     return 'waiting';
   };
 
@@ -77,6 +131,10 @@ const GameCard = ({ game, onGameUpdate, isMyGame = false }) => {
   };
 
   const status = getGameStatus();
+
+  const playGame = () => {
+    navigate(`/game/${game.id}`);
+  };
 
   return (
     <>
@@ -108,9 +166,9 @@ const GameCard = ({ game, onGameUpdate, isMyGame = false }) => {
               
               <HStack w="full" justify="space-between">
                 <HStack>
-                  <Avatar size="sm" bg={game.player2 ? "green.500" : "gray.300"} />
-                  <Text fontSize="sm" color={game.player2 ? "inherit" : "gray.500"}>
-                    Player 2: {game.player2 ? 
+                  <Avatar size="sm" bg={(game.player2 && game.player2 !== '0x0000000000000000000000000000000000000000') ? "green.500" : "gray.300"} />
+                  <Text fontSize="sm" color={(game.player2 && game.player2 !== '0x0000000000000000000000000000000000000000') ? "inherit" : "gray.500"}>
+                    Player 2: {(game.player2 && game.player2 !== '0x0000000000000000000000000000000000000000') ? 
                       `${game.player2.slice(0, 6)}...${game.player2.slice(-4)}` : 
                       'Waiting...'
                     }
@@ -121,35 +179,66 @@ const GameCard = ({ game, onGameUpdate, isMyGame = false }) => {
             </VStack>
 
             {/* Winner Display */}
-            {game.winner && (
+            {status === 'completed' && game.winner && game.winner !== '0x0000000000000000000000000000000000000000' && (
               <HStack justify="center">
                 <Text fontWeight="bold" color="green.500">
-                  Winner: {game.winner.slice(0, 6)}...{game.winner.slice(-4)}
+                  🏆 Winner: {game.winner.slice(0, 6)}...{game.winner.slice(-4)}
                   {game.winner === account && ' (You!)'}
                 </Text>
               </HStack>
             )}
 
             {/* Actions */}
-            {!game.player2 && game.player1 !== account && account && (
+            {status === 'waiting' && game.player1 !== account && account && (
               <Button
                 colorScheme="blue"
                 onClick={onOpen}
                 isDisabled={!account}
+                size="lg"
               >
                 Join Game (1 W3D)
               </Button>
             )}
 
-            {game.player2 && !game.winner && (
-              <Button colorScheme="green" isDisabled>
+            {status === 'active' && (game.player1 === account || game.player2 === account) && (
+              <Button 
+                colorScheme="green" 
+                onClick={playGame}
+                size="lg"
+              >
+                🎮 Play Game Now!
+              </Button>
+            )}
+
+            {status === 'active' && !(game.player1 === account || game.player2 === account) && (
+              <Button 
+                colorScheme="gray"
+                isDisabled={true}
+                size="lg"
+              >
                 Game in Progress
               </Button>
             )}
 
-            {game.winner && game.winner === account && !game.claimed && (
-              <Button colorScheme="yellow">
-                Claim Prize (2 W3D)
+            {status === 'completed' && game.winner === account && !game.claimed && (
+              <Button 
+                colorScheme="yellow"
+                onClick={claimPrize}
+                isLoading={isClaiming}
+                loadingText="Claiming..."
+                size="lg"
+              >
+                🏆 Claim Prize (2 W3D)
+              </Button>
+            )}
+
+            {status === 'completed' && game.winner !== account && (
+              <Button 
+                colorScheme="gray"
+                isDisabled={true}
+                size="lg"
+              >
+                Game Completed
               </Button>
             )}
           </VStack>

@@ -1,8 +1,9 @@
 import { ethers } from 'ethers';
+import config from '../config.js';
 
-// Contract addresses from environment
-const TOKEN_ADDRESS = import.meta.env.VITE_TOKEN_CONTRACT_ADDRESS;
-const GAME_ADDRESS = import.meta.env.VITE_GAME_CONTRACT_ADDRESS;
+// Contract addresses from config
+const TOKEN_ADDRESS = config.TOKEN_CONTRACT_ADDRESS;
+const GAME_ADDRESS = config.GAME_CONTRACT_ADDRESS;
 
 // Extended ABI with all necessary functions
 const TOKEN_ABI = [

@@ -16,7 +16,8 @@ const GameList = () => {
         const gameCount = await gameContract.gameIdCounter();
         const loadedGames = [];
 
-        for (let i = 0; i < gameCount; i++) {
+        // Load games in reverse order so newest games appear first
+        for (let i = gameCount - 1; i >= 0; i--) {
           const game = await gameContract.games(i);
           loadedGames.push({
             id: i,

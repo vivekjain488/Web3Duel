@@ -18,16 +18,7 @@ app.use(express.json());
 
 // Game state management
 const activeGames = new Map();
-const playerQueues = new Map();
-
-// Game types and their URLs
-const gameTypes = {
-  'Rock Paper Scissors': 'https://rock-paper-scissors-multiplayer.example.com',
-  'Tic Tac Toe': 'https://tic-tac-toe-multiplayer.example.com',
-  'Card Game': 'https://card-game-multiplayer.example.com',
-  'Puzzle Game': 'https://puzzle-game-multiplayer.example.com',
-  'Racing Game': 'https://racing-game-multiplayer.example.com'
-};
+const gameRooms = new Map();
 
 console.log('🎮 Web3Duel Game Server Starting...');
 
@@ -42,82 +33,100 @@ io.on('connection', (socket) => {
     socket.join(roomName);
     socket.playerAddress = playerAddress;
     socket.gameId = gameId;
+    socket.gameType = gameType;
     
-    console.log(`🎯 Player ${playerAddress} joined game ${gameId}`);
+    console.log(`🎯 Player ${playerAddress} joined game ${gameId} (${gameType})`);
     
     if (!activeGames.has(gameId)) {
       activeGames.set(gameId, {
         players: [{ id: socket.id, address: playerAddress }],
         gameType,
         status: 'waiting',
-        moves: {},
-        winner: null
+        gameState: initializeGameState(gameType)
       });
     } else {
       const game = activeGames.get(gameId);
-      game.players.push({ id: socket.id, address: playerAddress });
-      
-      if (game.players.length === 2) {
-        game.status = 'active';
-        console.log(`🚀 Game ${gameId} started with 2 players`);
-        io.to(roomName).emit('gameStart', {
-          gameId,
-          players: game.players,
-          gameUrl: gameTypes[gameType] || 'https://default-game.example.com'
-        });
+      if (game.players.length < 2) {
+        game.players.push({ id: socket.id, address: playerAddress });
+        
+        if (game.players.length === 2) {
+          game.status = 'active';
+          console.log(`🚀 Game ${gameId} started with 2 players`);
+          io.to(roomName).emit('gameStart', {
+            gameId,
+            players: game.players,
+            gameType
+          });
+        }
       }
     }
     
     socket.emit('joinedGame', { gameId, roomName });
+    socket.to(roomName).emit('playerJoined', { gameId, playerAddress });
   });
 
-  // Handle game moves
-  socket.on('gameMove', (moveData) => {
-    const { gameId, move, playerAddress } = moveData;
-    const game = activeGames.get(gameId);
+  // Handle game-specific moves
+  socket.on('gameMove', (data) => {
+    const game = activeGames.get(data.gameId);
+    if (!game || game.status !== 'active') return;
+
+    const roomName = `game-${data.gameId}`;
     
-    if (game && game.status === 'active') {
-      game.moves[playerAddress] = move;
-      const roomName = `game-${gameId}`;
-      
-      console.log(`🎮 Move received from ${playerAddress} in game ${gameId}`);
-      
-      // Broadcast move to other players
-      socket.to(roomName).emit('opponentMove', { move, player: playerAddress });
-      
-      // Check if both players have made moves (for turn-based games)
-      if (Object.keys(game.moves).length === 2) {
-        io.to(roomName).emit('allMovesReceived', game.moves);
-        game.moves = {}; // Reset for next round
-      }
+    switch (socket.gameType) {
+      case 'Tic Tac Toe':
+        handleTicTacToeMove(data, game, roomName);
+        break;
+      case 'Number Guessing':
+        handleNumberGuessingMove(data, game, roomName);
+        break;
+      case 'Rock Paper Scissors':
+        handleRockPaperScissorsMove(data, game, roomName);
+        break;
     }
   });
 
-  // Handle game results
-  socket.on('gameResult', (resultData) => {
-    const { gameId, winner, loser } = resultData;
-    const game = activeGames.get(gameId);
+  // Handle player choices for Rock Paper Scissors
+  socket.on('playerChoice', (data) => {
+    const game = activeGames.get(data.gameId);
+    if (!game || game.status !== 'active') return;
+
+    const roomName = `game-${data.gameId}`;
     
-    if (game && game.status === 'active') {
-      game.winner = winner;
-      game.status = 'completed';
-      const roomName = `game-${gameId}`;
+    if (!game.gameState.currentRound) {
+      game.gameState.currentRound = { choices: {}, round: game.gameState.round || 1 };
+    }
+    
+    game.gameState.currentRound.choices[data.player] = data.choice;
+    
+    socket.to(roomName).emit('opponentMove', { gameId: data.gameId });
+    
+    // Check if both players have chosen
+    const choices = game.gameState.currentRound.choices;
+    if (Object.keys(choices).length === 2) {
+      const players = Object.keys(choices);
+      const [player1Choice, player2Choice] = [choices[players[0]], choices[players[1]]];
       
-      console.log(`🏆 Game ${gameId} completed. Winner: ${winner}`);
+      let roundWinner = 'tie';
+      if (player1Choice !== player2Choice) {
+        const wins = { rock: 'scissors', paper: 'rock', scissors: 'paper' };
+        roundWinner = wins[player1Choice] === player2Choice ? players[0] : players[1];
+      }
       
-      io.to(roomName).emit('gameEnd', {
-        gameId,
-        winner,
-        loser,
-        timestamp: new Date().toISOString()
+      io.to(roomName).emit('bothPlayersChosen', {
+        gameId: data.gameId,
+        choices,
+        roundWinner
       });
       
-      // Clean up game after 1 minute
-      setTimeout(() => {
-        activeGames.delete(gameId);
-        console.log(`🗑️ Cleaned up game ${gameId}`);
-      }, 60000);
+      // Reset for next round
+      game.gameState.currentRound = null;
     }
+  });
+
+  // Handle game initialization
+  socket.on('initGame', (data) => {
+    const roomName = `game-${data.gameId}`;
+    socket.to(roomName).emit('gameInit', data);
   });
 
   // Handle disconnection
@@ -127,10 +136,8 @@ io.on('connection', (socket) => {
     if (socket.gameId) {
       const game = activeGames.get(socket.gameId);
       if (game) {
-        // Remove player from game
         game.players = game.players.filter(p => p.id !== socket.id);
         
-        // If game was active and player left, end the game
         if (game.status === 'active' && game.players.length < 2) {
           const roomName = `game-${socket.gameId}`;
           socket.to(roomName).emit('playerDisconnected', {
@@ -138,10 +145,63 @@ io.on('connection', (socket) => {
             disconnectedPlayer: socket.playerAddress
           });
         }
+        
+        if (game.players.length === 0) {
+          activeGames.delete(socket.gameId);
+          console.log(`🗑️ Cleaned up empty game ${socket.gameId}`);
+        }
       }
     }
   });
 });
+
+function initializeGameState(gameType) {
+  switch (gameType) {
+    case 'Tic Tac Toe':
+      return { board: Array(9).fill(''), currentTurn: null };
+    case 'Number Guessing':
+      return { targetNumber: null, guesses: [], maxGuesses: 7 };
+    case 'Rock Paper Scissors':
+      return { scores: {}, round: 1, maxRounds: 5 };
+    default:
+      return {};
+  }
+}
+
+function handleTicTacToeMove(data, game, roomName) {
+  game.gameState.board = data.board;
+  game.gameState.currentTurn = data.nextTurn;
+  
+  if (data.winner) {
+    game.status = 'completed';
+    game.winner = data.winner;
+  }
+  
+  io.to(roomName).emit('gameMove', data);
+}
+
+function handleNumberGuessingMove(data, game, roomName) {
+  game.gameState.guesses = data.guesses;
+  
+  if (data.winner) {
+    game.status = 'completed';
+    game.winner = data.winner;
+  }
+  
+  io.to(roomName).emit('gameMove', data);
+}
+
+function handleRockPaperScissorsMove(data, game, roomName) {
+  game.gameState.scores = data.scores;
+  game.gameState.round = data.round;
+  
+  if (data.winner) {
+    game.status = 'completed';
+    game.winner = data.winner;
+  }
+  
+  io.to(roomName).emit('gameMove', data);
+}
 
 // REST API endpoints
 app.get('/', (req, res) => {
@@ -149,6 +209,7 @@ app.get('/', (req, res) => {
     message: 'Web3Duel Game Server',
     status: 'running',
     activeGames: activeGames.size,
+    supportedGames: ['Tic Tac Toe', 'Number Guessing', 'Rock Paper Scissors'],
     timestamp: new Date().toISOString()
   });
 });
@@ -156,37 +217,20 @@ app.get('/', (req, res) => {
 app.get('/api/active-games', (req, res) => {
   const games = Array.from(activeGames.entries()).map(([id, game]) => ({
     id,
-    ...game,
-    playerCount: game.players.length
+    gameType: game.gameType,
+    status: game.status,
+    playerCount: game.players.length,
+    winner: game.winner
   }));
-  res.json(games);
-});
-
-app.get('/api/game/:id', (req, res) => {
-  const gameId = req.params.id;
-  const game = activeGames.get(parseInt(gameId));
   
-  if (game) {
-    res.json({ id: gameId, ...game });
-  } else {
-    res.status(404).json({ error: 'Game not found' });
-  }
-});
-
-app.get('/api/stats', (req, res) => {
-  res.json({
-    totalGames: activeGames.size,
-    activeConnections: io.engine.clientsCount,
-    gameTypes: Object.keys(gameTypes),
-    uptime: process.uptime()
-  });
+  res.json(games);
 });
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
   console.log(`🚀 Game server running on port ${PORT}`);
+  console.log(`🎮 Supported games: Tic Tac Toe, Number Guessing, Rock Paper Scissors`);
   console.log(`📊 Visit http://localhost:${PORT} for server status`);
-  console.log(`🎮 WebSocket ready for game connections`);
 });
 
 // Graceful shutdown
@@ -194,6 +238,5 @@ process.on('SIGTERM', () => {
   console.log('🛑 SIGTERM received, shutting down gracefully');
   server.close(() => {
     console.log('✅ Server closed');
-    process.exit(0);
   });
 });

@@ -62,7 +62,8 @@ const GameDashboard = () => {
       const gameCount = await gameContract.gameIdCounter();
       const loadedGames = [];
 
-      for (let i = 0; i < gameCount; i++) {
+      // Load games in reverse order so newest games appear first
+      for (let i = gameCount - 1; i >= 0; i--) {
         try {
           const game = await gameContract.games(i);
           loadedGames.push({
@@ -223,7 +224,11 @@ const GameDashboard = () => {
           ) : (
             <Grid templateColumns="repeat(auto-fill, minmax(320px, 1fr))" gap={4}>
               {availableGames.map((game) => (
-                <GameCard key={game.id} game={game} />
+                <GameCard 
+                  key={game.id} 
+                  game={game} 
+                  onGameUpdate={loadGames}
+                />
               ))}
             </Grid>
           )}
@@ -252,7 +257,12 @@ const GameDashboard = () => {
             ) : (
               <Grid templateColumns="repeat(auto-fill, minmax(320px, 1fr))" gap={4}>
                 {myGames.map((game) => (
-                  <GameCard key={game.id} game={game} />
+                  <GameCard 
+                    key={game.id} 
+                    game={game} 
+                    onGameUpdate={loadGames}
+                    isMyGame={true}
+                  />
                 ))}
               </Grid>
             )}

@@ -37,6 +37,7 @@ import {
 import { FaGamepad, FaCoins, FaTrophy, FaUsers } from 'react-icons/fa';
 import { ethers } from 'ethers';
 import { useWeb3 } from '../context/Web3Context';
+import config from '../config.js';
 
 const CreateGame = ({ onGameCreated }) => {
   const [gameType, setGameType] = useState('');
@@ -50,17 +51,13 @@ const CreateGame = ({ onGameCreated }) => {
   const toast = useToast();
 
   const gameTypes = [
-    'Rock Paper Scissors',
     'Tic Tac Toe',
     'Number Guessing',
-    'Card Game',
-    'Trivia Quiz',
-    'Memory Game',
-    'Custom'
+    'Rock Paper Scissors'
   ];
 
-  const ENTRY_FEE = ethers.parseEther("1");
-  const GAME_ADDRESS = import.meta.env.VITE_GAME_CONTRACT_ADDRESS;
+  const ENTRY_FEE = ethers.parseEther(config.ENTRY_FEE);
+  const GAME_ADDRESS = config.GAME_CONTRACT_ADDRESS;
 
   // Load user stats
   useEffect(() => {

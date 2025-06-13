@@ -7,148 +7,197 @@ import {
   Button,
   Alert,
   AlertIcon,
-  Select,
-  useToast
+  useToast,
+  Badge
 } from '@chakra-ui/react';
+import io from 'socket.io-client';
+import TicTacToe from './games/TicTacToe';
+import NumberGuessing from './games/NumberGuessing';
+import RockPaperScissors from './games/RockPaperScissors';
+import { useWeb3 } from '../context/Web3Context';
 
-const GameFrame = ({ gameUrl, gameId, player1, player2, currentPlayer, onGameEnd }) => {
+const GameFrame = ({ game, onGameEnd }) => {
   const [gameStatus, setGameStatus] = useState('waiting');
-  const [winner, setWinner] = useState('');
-  const [timeLeft, setTimeLeft] = useState(300); // 5 minutes
+  const [socket, setSocket] = useState(null);
+  const [gameStarted, setGameStarted] = useState(false);
+  const { account, gameContract } = useWeb3();
   const toast = useToast();
 
-  // Simulate game timer
+  // Add safety check for game prop
+  if (!game || !game.id) {
+    return (
+      <VStack justify="center" h="400px" spacing={4}>
+        <Alert status="error">
+          <AlertIcon />
+          Invalid game data
+        </Alert>
+      </VStack>
+    );
+  }
+
   useEffect(() => {
-    if (gameStatus === 'playing' && timeLeft > 0) {
-      const timer = setTimeout(() => setTimeLeft(timeLeft - 1), 1000);
-      return () => clearTimeout(timer);
-    } else if (timeLeft === 0) {
-      // Game timeout
-      handleGameTimeout();
-    }
-  }, [gameStatus, timeLeft]);
+    // Only initialize if we have valid game data
+    if (!game || !game.id || !account) return;
 
-  const startGame = () => {
-    setGameStatus('playing');
-    toast({
-      title: 'Game Started!',
-      description: 'Good luck!',
-      status: 'info',
-      duration: 3000,
-      isClosable: true,
+    // Initialize socket connection
+    const newSocket = io('http://localhost:3001');
+    setSocket(newSocket);
+
+    // Join game room
+    newSocket.emit('joinGame', {
+      gameId: game.id,
+      playerAddress: account,
+      gameType: game.gameType
     });
-  };
 
-  const declareWinner = () => {
-    if (winner && onGameEnd) {
-      onGameEnd(gameId, winner);
-      setGameStatus('completed');
+    newSocket.on('gameStart', (data) => {
+      setGameStarted(true);
+      setGameStatus('playing');
+      toast({
+        title: 'Game Started!',
+        description: 'Both players are ready. Good luck!',
+        status: 'success',
+        duration: 3000,
+        isClosable: true,
+      });
+    });
+
+    newSocket.on('playerJoined', (data) => {
+      toast({
+        title: 'Player Joined',
+        description: 'Another player has joined the game!',
+        status: 'info',
+        duration: 3000,
+        isClosable: true,
+      });
+    });
+
+    newSocket.on('playerDisconnected', (data) => {
+      toast({
+        title: 'Player Disconnected',
+        description: 'Your opponent has left the game.',
+        status: 'warning',
+        duration: 5000,
+        isClosable: true,
+      });
+      setGameStatus('waiting');
+    });
+
+    return () => {
+      newSocket.disconnect();
+    };
+  }, [game.id, account, toast]);
+
+  const handleGameEnd = async (gameId, winner) => {
+    try {
+      // Declare winner on blockchain
+      if (winner && winner !== 'draw') {
+        const tx = await gameContract.declareWinner(gameId, winner);
+        await tx.wait();
+        
+        toast({
+          title: 'Game Completed!',
+          description: `Winner declared on blockchain: ${winner === account ? 'You won!' : 'Opponent won!'}`,
+          status: winner === account ? 'success' : 'info',
+          duration: 5000,
+          isClosable: true,
+        });
+      }
+      
+      if (onGameEnd) {
+        onGameEnd();
+      }
+    } catch (error) {
+      console.error('Error declaring winner:', error);
+      toast({
+        title: 'Error',
+        description: 'Failed to declare winner on blockchain',
+        status: 'error',
+        duration: 5000,
+        isClosable: true,
+      });
     }
   };
 
-  const handleGameTimeout = () => {
-    setGameStatus('completed');
-    toast({
-      title: 'Game Timeout',
-      description: 'Game ended due to timeout',
-      status: 'warning',
-      duration: 5000,
-      isClosable: true,
-    });
-  };
+  const renderGame = () => {
+    if (!gameStarted) {
+      return (
+        <VStack justify="center" h="400px" spacing={4}>
+          <Text fontSize="xl">Waiting for opponent...</Text>
+          <Text fontSize="sm" color="gray.500">
+            {game.player2 ? 'Both players connected. Game will start soon!' : 'Waiting for second player to join.'}
+          </Text>
+        </VStack>
+      );
+    }
 
-  const formatTime = (seconds) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+    const gameProps = {
+      gameId: game.id,
+      player1: game.player1,
+      player2: game.player2,
+      currentPlayer: account,
+      onGameEnd: handleGameEnd,
+      socket
+    };
+
+    switch (game.gameType) {
+      case 'Tic Tac Toe':
+        return <TicTacToe {...gameProps} />;
+      case 'Number Guessing':
+        return <NumberGuessing {...gameProps} />;
+      case 'Rock Paper Scissors':
+        return <RockPaperScissors {...gameProps} />;
+      default:
+        return (
+          <Alert status="error">
+            <AlertIcon />
+            Unknown game type: {game.gameType}
+          </Alert>
+        );
+    }
   };
 
   return (
-    <VStack spacing={4} h="600px">
+    <VStack spacing={4} h="600px" p={4}>
       {/* Game Info */}
       <HStack w="full" justify="space-between" p={4} bg="gray.50" borderRadius="md">
-        <Text fontWeight="bold">
-          Player 1: {player1.slice(0, 6)}...{player1.slice(-4)}
-          {player1 === currentPlayer && ' (You)'}
-        </Text>
-        <Text fontWeight="bold">VS</Text>
-        <Text fontWeight="bold">
-          Player 2: {player2.slice(0, 6)}...{player2.slice(-4)}
-          {player2 === currentPlayer && ' (You)'}
-        </Text>
+        <VStack align="start" spacing={1}>
+          <Text fontWeight="bold">{game.gameType}</Text>
+          <Badge colorScheme="blue">Game #{game.id}</Badge>
+        </VStack>
+        <VStack align="end" spacing={1}>
+          <Text fontSize="sm">Prize Pool: 2 W3D</Text>
+          <Badge colorScheme={gameStarted ? 'green' : 'yellow'}>
+            {gameStarted ? 'Playing' : 'Waiting'}
+          </Badge>
+        </VStack>
       </HStack>
 
-      {/* Game Timer */}
-      {gameStatus === 'playing' && (
-        <Alert status="info">
-          <AlertIcon />
-          Time remaining: {formatTime(timeLeft)}
-        </Alert>
-      )}
-
-      {/* Game Frame */}
-      <Box w="full" h="400px" border="1px" borderColor="gray.200" borderRadius="md">
-        {gameStatus === 'waiting' ? (
-          <VStack justify="center" h="full" spacing={4}>
-            <Text fontSize="xl">Ready to play?</Text>
-            <Button colorScheme="blue" onClick={startGame}>
-              Start Game
-            </Button>
-          </VStack>
-        ) : gameStatus === 'playing' ? (
-          <iframe
-            src={gameUrl}
-            width="100%"
-            height="100%"
-            style={{ border: 'none', borderRadius: '6px' }}
-            allow="fullscreen"
-            title={`Game ${gameId}`}
-          />
-        ) : (
-          <VStack justify="center" h="full" spacing={4}>
-            <Text fontSize="xl" color="green.500">
-              Game Completed!
-            </Text>
-            {winner && (
-              <Text>
-                Winner: {winner.slice(0, 6)}...{winner.slice(-4)}
-              </Text>
-            )}
-          </VStack>
-        )}
-      </Box>
-
-      {/* Game Controls */}
-      {gameStatus === 'playing' && (
-        <VStack spacing={4} w="full">
-          <HStack spacing={4} w="full">
-            <Select
-              placeholder="Declare winner..."
-              value={winner}
-              onChange={(e) => setWinner(e.target.value)}
-            >
-              <option value={player1}>
-                Player 1: {player1.slice(0, 6)}...{player1.slice(-4)}
-              </option>
-              <option value={player2}>
-                Player 2: {player2.slice(0, 6)}...{player2.slice(-4)}
-              </option>
-            </Select>
-            <Button
-              colorScheme="green"
-              onClick={declareWinner}
-              isDisabled={!winner}
-            >
-              Declare Winner
-            </Button>
-          </HStack>
-          
-          <Text fontSize="sm" color="gray.600" textAlign="center">
-            In a real implementation, the game result would be determined automatically
-            by the game iframe or through smart contract integration.
+      {/* Players Info */}
+      <HStack w="full" justify="space-between" p={4} bg="gray.50" borderRadius="md">
+        <HStack>
+          <Badge colorScheme="blue">Player 1</Badge>
+          <Text fontSize="sm">
+            {game.player1.slice(0, 6)}...{game.player1.slice(-4)}
+            {game.player1 === account && ' (You)'}
           </Text>
-        </VStack>
-      )}
+        </HStack>
+        <Text fontWeight="bold">VS</Text>
+        <HStack>
+          <Badge colorScheme="red">Player 2</Badge>
+          <Text fontSize="sm">
+            {game.player2 ? 
+              `${game.player2.slice(0, 6)}...${game.player2.slice(-4)}${game.player2 === account ? ' (You)' : ''}` : 
+              'Waiting...'
+            }
+          </Text>
+        </HStack>
+      </HStack>
+
+      {/* Game Area */}
+      <Box w="full" flex="1" display="flex" alignItems="center" justifyContent="center">
+        {renderGame()}
+      </Box>
     </VStack>
   );
 };

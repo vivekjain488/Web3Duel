@@ -39,39 +39,54 @@ const MainApp = () => {
   ];
 
   const renderContent = () => {
-    if (isConnecting) {
+    try {
+      if (isConnecting) {
+        return (
+          <Box textAlign="center" py={20}>
+            <Spinner size="xl" color="blue.500" />
+            <Text mt={4}>Connecting to your wallet...</Text>
+          </Box>
+        );
+      }
+
+      if (!account) {
+        return (
+          <Box textAlign="center" py={20}>
+            <VStack spacing={6}>
+              <Icon as={FaGamepad} boxSize={20} color="blue.500" />
+              <Heading size="lg">Welcome to Web3Duel!</Heading>
+              <Text color="gray.600" fontSize="lg" maxW="md">
+                The ultimate blockchain gaming platform. Connect your wallet to start playing and earning!
+              </Text>
+              <WalletConnect />
+            </VStack>
+          </Box>
+        );
+      }
+
+      switch (activeTab) {
+        case 'dashboard':
+          return <GameDashboard />;
+        case 'arena':
+          return <GameArena />;
+        case 'leaderboard':
+          return <Leaderboard />;
+        default:
+          return <GameDashboard />;
+      }
+    } catch (error) {
+      console.error('Error rendering content:', error);
       return (
         <Box textAlign="center" py={20}>
-          <Spinner size="xl" color="blue.500" />
-          <Text mt={4}>Connecting to your wallet...</Text>
+          <Alert status="error">
+            <AlertIcon />
+            <VStack align="start">
+              <Text fontWeight="bold">Application Error</Text>
+              <Text fontSize="sm">{error.message}</Text>
+            </VStack>
+          </Alert>
         </Box>
       );
-    }
-
-    if (!account) {
-      return (
-        <Box textAlign="center" py={20}>
-          <VStack spacing={6}>
-            <Icon as={FaGamepad} boxSize={20} color="blue.500" />
-            <Heading size="lg">Welcome to Web3Duel!</Heading>
-            <Text color="gray.600" fontSize="lg" maxW="md">
-              The ultimate blockchain gaming platform. Connect your wallet to start playing and earning!
-            </Text>
-            <WalletConnect />
-          </VStack>
-        </Box>
-      );
-    }
-
-    switch (activeTab) {
-      case 'dashboard':
-        return <GameDashboard />;
-      case 'arena':
-        return <GameArena />;
-      case 'leaderboard':
-        return <Leaderboard />;
-      default:
-        return <GameDashboard />;
     }
   };
 

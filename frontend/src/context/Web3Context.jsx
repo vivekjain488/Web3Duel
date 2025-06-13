@@ -14,6 +14,8 @@ export const Web3Provider = ({ children }) => {
   const [network, setNetwork] = useState(null);
   const [error, setError] = useState(null);
 
+  console.log('Web3Provider rendering with account:', account);
+
   const connectWallet = async () => {
     if (!window.ethereum) {
       setError('MetaMask not found. Please install MetaMask to use this application');
@@ -35,11 +37,28 @@ export const Web3Provider = ({ children }) => {
       setNetwork(network);
       
       const signer = await provider.getSigner();
-      const tokenContract = getTokenContract(signer);
-      const gameContract = getGameContract(signer);
       
-      setTokenContract(tokenContract);
-      setGameContract(gameContract);
+      try {
+        const tokenContract = getTokenContract(signer);
+        const gameContract = getGameContract(signer);
+        
+        console.log('Token contract:', tokenContract);
+        console.log('Game contract:', gameContract);
+        
+        if (!tokenContract) {
+          throw new Error('Failed to initialize token contract');
+        }
+        if (!gameContract) {
+          throw new Error('Failed to initialize game contract');
+        }
+        
+        setTokenContract(tokenContract);
+        setGameContract(gameContract);
+      } catch (contractError) {
+        console.error('Contract initialization error:', contractError);
+        setError(`Contract error: ${contractError.message}`);
+        return false;
+      }
       
       // Get token balance
       if (tokenContract) {
@@ -47,9 +66,11 @@ export const Web3Provider = ({ children }) => {
           const balance = await tokenContract.balanceOf(accounts[0].address);
           setTokenBalance(ethers.formatEther(balance));
         } catch (balanceError) {
-          console.log('Could not fetch token balance:', balanceError);
+          console.error('Could not fetch token balance:', balanceError);
           setTokenBalance('0');
         }
+      } else {
+        console.error('Token contract is null');
       }
       
       return true;
@@ -134,6 +155,8 @@ export const Web3Provider = ({ children }) => {
           });
         } catch (error) {
           console.error('Error initializing Web3:', error);
+          // Don't set error to prevent white screen - let app load
+          console.warn('App will continue without Web3 connection');
         }
       }
     };
