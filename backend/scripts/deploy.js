@@ -1,18 +1,34 @@
 const hre = require("hardhat");
 
 async function main() {
-  const Coin = await hre.ethers.getContractFactory("Web3DuelCoin");
-  const coin = await Coin.deploy();
-  await coin.deployed();
-  console.log("Coin deployed to:", coin.address);
+  console.log("Deploying contracts...");
 
-  const Game = await hre.ethers.getContractFactory("Web3DuelGame");
-  const game = await Game.deploy(coin.address, hre.ethers.parseEther("100"));
-  await game.deployed();
-  console.log("Game deployed to:", game.address);
+  // Deploy Web3DuelToken
+  const Web3DuelToken = await hre.ethers.getContractFactory("Web3DuelToken");
+  const token = await Web3DuelToken.deploy();
+  await token.waitForDeployment();
+  
+  const tokenAddress = await token.getAddress();
+  console.log("Web3DuelToken deployed to:", tokenAddress);
+
+  // Deploy Web3DuelGame
+  const Web3DuelGame = await hre.ethers.getContractFactory("Web3DuelGame");
+  const game = await Web3DuelGame.deploy(tokenAddress, hre.ethers.parseEther("1"));
+  await game.waitForDeployment();
+  
+  const gameAddress = await game.getAddress();
+  console.log("Web3DuelGame deployed to:", gameAddress);
+
+  console.log("\n=== Deployment Summary ===");
+  console.log("Token Contract:", tokenAddress);
+  console.log("Game Contract:", gameAddress);
+  console.log("Network:", hre.network.name);
+  console.log("Entry Fee: 1 ETH");
 }
 
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+main()
+  .then(() => process.exit(0))
+  .catch((error) => {
+    console.error(error);
+    process.exit(1);
+  });
